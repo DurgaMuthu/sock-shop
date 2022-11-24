@@ -44,7 +44,7 @@ data:
     start_hour = 10
     end_hour = 16
     blacklisted_namespaces = ["kube-monkey","kube-system", "ethan", "kube-public", "velero", "kube-node-lease"]
-    whitelisted_namespaces = [ "chaos" ]
+    whitelisted_namespaces = [ "chaos","nginx","paymentapp"]
     [debug]
     enabled= true
     schedule_immediate_kill= true
