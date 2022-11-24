@@ -1,0 +1,72 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-monkey
+  namespace: kube-monkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-monkey
+  template:
+    metadata:
+      labels:
+        app: kube-monkey
+    spec:
+      containers:
+        -  name: kube-monkey
+           command:
+             - "/kube-monkey"
+           args: ["-v=5", "-log_dir=/var/log/kube-monkey"]
+           image: ayushsobti/kube-monkey:v0.3.0
+           volumeMounts:
+             - name: config-volume
+               mountPath: "/etc/kube-monkey"
+      serviceAccountName: kubemonkey
+      volumes:
+        - name: config-volume
+          configMap:
+            name: kube-monkey-config-map
+
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-monkey-config-map
+  namespace: kube-monkey
+data:
+  config.toml: |
+    [kubemonkey]
+    dry_run = false
+    run_hour = 8
+    start_hour = 10
+    end_hour = 16
+    blacklisted_namespaces = ["kube-monkey","kube-system", "ethan", "kube-public", "velero", "kube-node-lease"]
+    whitelisted_namespaces = [ "chaos" ]
+    [debug]
+    enabled= true
+    schedule_immediate_kill= true
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubemonkey
+  namespace: kube-monkey
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: kubemonkey
+  namespace: kube-monkey
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: ServiceAccount
+    name: kubemonkey
+    namespace: kube-monkey
