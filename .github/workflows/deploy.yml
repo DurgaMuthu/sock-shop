@@ -1,0 +1,63 @@
+name: Blue-Green Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js (if applicable)
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+
+      - name: Deploy to Green Environment
+        run: |
+          ssh -o StrictHostKeyChecking=no $GREEN_HOST_USER@$GREEN_HOST 'bash -s' <<'EOF'
+          cd /path/to/app
+          git pull origin main
+          npm install
+          npm run start
+          EOF
+        env:
+          GREEN_HOST: ${{ secrets.GREEN_HOST }}
+          GREEN_HOST_USER: ${{ secrets.GREEN_HOST_USER }}
+
+      - name: Health Check on Green Environment
+        run: curl --fail http://$GREEN_HOST:your_port/health || exit 1
+        env:
+          GREEN_HOST: ${{ secrets.GREEN_HOST }}
+        
+      - name: Switch Traffic to Green Environment
+        run: |
+          ssh -o StrictHostKeyChecking=no $BLUE_HOST_USER@$BLUE_HOST 'bash -s' <<'EOF'
+          # Update DNS or Load Balancer to point to Green Environment
+          # Example for AWS Route 53
+          aws route53 change-resource-record-sets --hosted-zone-id ZONE_ID --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"yourapp.example.com","Type":"A","AliasTarget":{"HostedZoneId":"Z2P70J7EXAMPLE","DNSName":"'$GREEN_HOST'.example.com","EvaluateTargetHealth":false}}}]}' --profile your_aws_profile
+          EOF
+        env:
+          BLUE_HOST: ${{ secrets.BLUE_HOST }}
+          BLUE_HOST_USER: ${{ secrets.BLUE_HOST_USER }}
+          GREEN_HOST: ${{ secrets.GREEN_HOST }}
+
+      - name: Post-deployment Cleanup (Optional)
+        run: |
+          ssh -o StrictHostKeyChecking=no $BLUE_HOST_USER@$BLUE_HOST 'bash -s' <<'EOF'
+          # Optional: Clean up old blue environment, etc.
+          EOF
+        env:
+          BLUE_HOST: ${{ secrets.BLUE_HOST }}
+          BLUE_HOST_USER: ${{ secrets.BLUE_HOST_USER }}
