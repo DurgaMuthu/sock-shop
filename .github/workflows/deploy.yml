@@ -1,4 +1,4 @@
-name: Blue-Green Deployment
+name: Blue-Green Deployment on GKE
 
 on:
   push:
@@ -13,51 +13,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Set up Node.js (if applicable)
-        uses: actions/setup-node@v2
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
         with:
-          node-version: '14'
+          version: 'latest'
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build project
-        run: npm run build
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ secrets.GKE_CLUSTER_NAME }} --zone ${{ secrets.GKE_ZONE }}
 
       - name: Deploy to Green Environment
         run: |
-          ssh -o StrictHostKeyChecking=no $GREEN_HOST_USER@$GREEN_HOST 'bash -s' <<'EOF'
-          cd /path/to/app
-          git pull origin main
-          npm install
-          npm run start
-          EOF
-        env:
-          GREEN_HOST: ${{ secrets.GREEN_HOST }}
-          GREEN_HOST_USER: ${{ secrets.GREEN_HOST_USER }}
+          kubectl apply -f deployment-green.yaml
+          kubectl apply -f service-green.yaml
 
-      - name: Health Check on Green Environment
-        run: curl --fail http://$GREEN_HOST:your_port/health || exit 1
-        env:
-          GREEN_HOST: ${{ secrets.GREEN_HOST }}
-        
+      - name: Wait for Green Deployment to be ready
+        run: |
+          kubectl rollout status deployment/my-app --namespace=green
+
+      - name: Run health check
+        run: |
+          GREEN_IP=$(kubectl get svc my-app -n green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          until curl --silent --fail http://$GREEN_IP/health; do
+            echo "Waiting for green deployment to be ready..."
+            sleep 10
+          done
+
       - name: Switch Traffic to Green Environment
         run: |
-          ssh -o StrictHostKeyChecking=no $BLUE_HOST_USER@$BLUE_HOST 'bash -s' <<'EOF'
-          # Update DNS or Load Balancer to point to Green Environment
-          # Example for AWS Route 53
-          aws route53 change-resource-record-sets --hosted-zone-id ZONE_ID --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"yourapp.example.com","Type":"A","AliasTarget":{"HostedZoneId":"Z2P70J7EXAMPLE","DNSName":"'$GREEN_HOST'.example.com","EvaluateTargetHealth":false}}}]}' --profile your_aws_profile
-          EOF
-        env:
-          BLUE_HOST: ${{ secrets.BLUE_HOST }}
-          BLUE_HOST_USER: ${{ secrets.BLUE_HOST_USER }}
-          GREEN_HOST: ${{ secrets.GREEN_HOST }}
+          kubectl apply -f service-blue.yaml
+          kubectl patch service my-app -n blue -p '{"spec":{"selector":{"app":"no-app"}}}'
+          kubectl patch service my-app -n green -p '{"spec":{"selector":{"app":"my-app"}}}'
 
       - name: Post-deployment Cleanup (Optional)
         run: |
-          ssh -o StrictHostKeyChecking=no $BLUE_HOST_USER@$BLUE_HOST 'bash -s' <<'EOF'
-          # Optional: Clean up old blue environment, etc.
-          EOF
-        env:
-          BLUE_HOST: ${{ secrets.BLUE_HOST }}
-          BLUE_HOST_USER: ${{ secrets.BLUE_HOST_USER }}
+          kubectl delete deployment my-app --namespace=blue
